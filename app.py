@@ -1872,18 +1872,23 @@ def auto_build():
         STATE["deck_ids"].append(oid)
         return True
 
-    # ---- Phase 1: auto-include staples (rocks + universal lands) -----
-    # Only colorless utility lands and "produces any of CI" lands here.
-    # Cycle lands (originals/shocks/triomes/etc.) are deferred to Phase 4
-    # so we can pick the cycle members that match the actual pip
-    # distribution of the assembled spell deck.
-    for name in STAPLE_MANA_ROCKS_ANY:
-        try_add(name)
+    # ---- Phase 1: utility lands ONLY ---------------------------------
+    # Mana rocks are deliberately deferred to Phase 4 (after synergy fill).
+    # Including them up front makes the synergy ranker think the deck is
+    # an artifact-mana strategy and biases later picks toward Doubling
+    # Cube / Chromatic Lantern / Manaweft Sliver / X-spells / etc., which
+    # have nothing to do with the commander's actual theme.  By keeping
+    # only commander-neutral utility lands in the deck during synergy
+    # ranking, the ranker focuses purely on what the commander cares
+    # about.  Cycle lands (originals/shocks/triomes/etc.) are deferred
+    # to Phase 5 so they can be matched to the deck's actual pip mix.
+    rocks_to_add = list(STAPLE_MANA_ROCKS_ANY)
+    if n_colors >= 2:
+        rocks_to_add += STAPLE_MANA_ROCKS_MULTI
+
     for name in STAPLE_LANDS_COLORLESS:
         try_add(name)
     if n_colors >= 2:
-        for name in STAPLE_MANA_ROCKS_MULTI:
-            try_add(name)
         for name in STAPLE_LANDS_MULTI:
             try_add(name)
     if n_colors >= 3:
@@ -1922,19 +1927,25 @@ def auto_build():
             STATE["deck_ids"].append(oid)
 
     # ---- Phase 3: synergy fill spell slots ---------------------------
-    # Fill up to (100 - 1 cmdr - 36 lands) = 63 non-land slots BEFORE
-    # building the mana base. This way we know what colors the deck
-    # actually wants when we pick the lands.
+    # Target enough non-land cards to leave room for the deferred mana
+    # rocks (Phase 4) and still total 63 non-land slots.  Every CI-legal
+    # rock counts toward the 63-spell target, so synergy fill stops
+    # earlier when the rock count is higher (more multi-color decks add
+    # more rocks).
     TOTAL_LANDS_TARGET = 36
     SPELL_TARGET = 100 - 1 - TOTAL_LANDS_TARGET  # 63
+    rocks_eligible = sum(
+        1 for n in rocks_to_add
+        if NAME_TO_ID.get(n.lower()) and is_legal(CARDS[NAME_TO_ID[n.lower()]])
+    )
+    SYNERGY_TARGET = max(0, SPELL_TARGET - rocks_eligible)
     safety = 200
     while safety > 0:
-        # Count current non-land non-commander slots
         non_land_slots = sum(
             1 for o in STATE["deck_ids"]
             if "LAND" not in (CARDS[o].get("card_types") or [])
         )
-        if non_land_slots >= SPELL_TARGET:
+        if non_land_slots >= SYNERGY_TARGET:
             break
         safety -= 1
         suggestions = rank_suggestions(top_n=10)
@@ -1947,7 +1958,14 @@ def auto_build():
             break
         STATE["deck_ids"].append(pick["card"]["oracle_id"])
 
-    # ---- Phase 4: pip-aware mana base --------------------------------
+    # ---- Phase 4: deferred staple mana rocks -------------------------
+    # Sol Ring etc. are added now, AFTER synergy ranking has finished,
+    # so their presence in the deck doesn't bias the ranker toward
+    # artifact-mana / X-spell / "ramp_mana producer" themes.
+    for name in rocks_to_add:
+        try_add(name)
+
+    # ---- Phase 5: pip-aware mana base --------------------------------
     # Now count the colored mana pips in every non-land card in the deck
     # (commander + spells) and build the mana base proportional to those
     # demands.  A WUBRG deck with 40 white pips and 10 of every other

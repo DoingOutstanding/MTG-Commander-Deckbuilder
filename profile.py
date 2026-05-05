@@ -129,8 +129,16 @@ TRIBES = {
     "Praetor", "Reflection", "Incarnation", "Egg", "Mole", "Mouse",
     "Nautilus", "Hippogriff", "Pegasus", "Unicorn", "Rhino", "Yeti",
     "Halfling", "Gnome", "Detective",
-    # Non-creature subtypes that have tribal cards
-    "Equipment", "Aura", "Vehicle", "Saga", "Background", "Class", "Role",
+    # NOTE: non-creature subtypes (Equipment, Aura, Vehicle, Saga,
+    # Background, Class, Role) are deliberately NOT in TRIBES even
+    # though some payoff cards "matter" for them.  Including them
+    # here makes every Aura pair with every other Aura via tribal/
+    # tribal_lord edges, which snowballs decks toward "tons of
+    # mana auras" or "every equipment ever printed" regardless of
+    # what the commander actually wants.  Those cross-card payoffs
+    # are already covered by the dedicated mechanics (`auras_matter`,
+    # `equipment_matters`, `vehicles_matter`) which fire only when a
+    # producer (Sram, Stoneforge, etc.) is paired with members.
 }
 
 # Mechanic taxonomy. Each tag has two facets: "produces X" (the card creates,
@@ -487,6 +495,15 @@ def parse_card(card: dict):
             mechanics_produces.append(tag)
         if cares_pat and re.search(cares_pat, txt):
             mechanics_cares.append(tag)
+    # Lands almost universally have "{T}: Add {X}" which the ramp_mana
+    # producer regex catches, but a land tapping for its single colored
+    # or colorless pip isn't *ramp* — it's just being a land. Stripping
+    # this tag from lands prevents mana doublers (Mana Reflection,
+    # Doubling Cube, Wild Growth) from getting an amplifier edge against
+    # every land in the deck, which inflated their score by hundreds of
+    # points and crowded out the commander's actual theme.
+    if "LAND" in card_types and "ramp_mana" in mechanics_produces:
+        mechanics_produces.remove("ramp_mana")
 
     # Amplifier / replacement effects — cards that double a resource the
     # rest of the deck produces. They get a dedicated flag so the interaction

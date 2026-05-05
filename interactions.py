@@ -35,7 +35,16 @@ BIDIRECTIONAL_TAGS = {
     "artifacts_matter", "enchantments_matter",
     "lifegain", "lifeloss_opp",
     "spellslinger", "draw_cards",
-    "landfall", "ramp_mana",
+    "landfall",
+    # NOTE: ramp_mana is deliberately *not* bidirectional. Two mana
+    # producers genuinely don't compound 1:1 — there's a hard ceiling
+    # on how much mana you can spend per turn, and a deck with 6 rocks
+    # is barely better than one with 4. Bidirectional ramp_mana created
+    # a clique where every rock paired with every other rock for free,
+    # snowballing decks toward "lots of ramp" themes (Doubling Cube,
+    # Mana Reflection, Joiner Adept, Manaweft Sliver) regardless of
+    # what the commander actually wanted. Producer → carer (rock + an
+    # X-spell that cares about mana) still works fine.
     "counters_in_general",
     "untap",
     "voltron_attached",
@@ -251,18 +260,17 @@ def score_pair(a, b, tribe_sizes=None):
                 edges.append({"type": "amplifier", "tag": amp_flag,
                               "direction": "b_amplifies_a", "weight": 14.0})
                 seen_amp.add(key)
-    # Mana doublers also pair with anything that's a land that produces colored
-    # mana (treats lands as implicit mana producers for this edge).
-    if a.get("is_amp_mana") and "LAND" in (b.get("card_types") or []) and (b.get("colors_produced") or []):
-        if ("is_amp_mana", "a") not in seen_amp:
-            edges.append({"type": "amplifier", "tag": "is_amp_mana",
-                          "direction": "a_amplifies_b", "weight": 14.0})
-            seen_amp.add(("is_amp_mana", "a"))
-    if b.get("is_amp_mana") and "LAND" in (a.get("card_types") or []) and (a.get("colors_produced") or []):
-        if ("is_amp_mana", "b") not in seen_amp:
-            edges.append({"type": "amplifier", "tag": "is_amp_mana",
-                          "direction": "b_amplifies_a", "weight": 14.0})
-            seen_amp.add(("is_amp_mana", "b"))
+    # NOTE: we used to also fire is_amp_mana edges between a mana doubler
+    # and every individual land that produces colored mana. That created
+    # absurd scores during auto-build — Mana Reflection got 14 points
+    # against every single dual / shock / triome in the deck, totalling
+    # 400+ from the mana base alone, which crowded out the commander's
+    # actual theme. The edge is removed: a deck plays lands regardless,
+    # so a doubler's "synergy" with every land is real on the table but
+    # not a useful signal for "should this card be in the deck?".  The
+    # AMP_PAIRS loop above still pairs is_amp_mana cards with explicit
+    # ramp_mana/mana producers (rocks, dorks, treasure-makers, X-spell
+    # payoffs), which is the legitimate use.
 
     # ---------- Self-restricted subtype amplifiers (Cloud / etc.) ------
     # A card that doubles triggered abilities of an attached subtype
