@@ -867,9 +867,14 @@ def rank_suggestions(top_n=40):
     # candidate_pool already filters those out, but be defensive).
     deck_neighbors -= deck_oids
 
-    if deck_neighbors or _NEIGHBORS:
-        # Only filter when we have neighbor data; otherwise fall back to
-        # the full pool (e.g. fresh install with empty cache).
+    if deck_neighbors:
+        # Only filter when *this deck's* deckmates have known neighbors.
+        # If `_NEIGHBORS` has entries from previous commanders but the
+        # current deck's cards haven't been score_pair'd yet, filtering
+        # on `deck_neighbors=∅` would leave only lands in the pool and
+        # synergy fill would bail with a 60-card deck. Falling back to
+        # the full pool here costs the first rank call's iteration time
+        # but populates the cache, so subsequent calls are fast.
         filtered = []
         for cand in pool:
             if cand["oracle_id"] in deck_neighbors or "LAND" in cand["card_types"]:
@@ -1017,15 +1022,25 @@ input[type=text] { width: 100%; padding: .6em; font-size: 1.1em; background: #2a
 </head><body>
 <h1>MTG Commander Deckbuilder</h1>
 <p>Pick a commander. The app will then suggest cards that interact most strongly with your commander, color-identity filtered. Or <a href="/import" style="color:#6cf;">import an existing deck list</a> or <a href="/random_commander" style="color:#6cf;">pick a random one</a>.</p>
-<input type="text" id="search" placeholder="Search by commander name (e.g. 'Krenko', 'Atraxa', 'Heliod')..." autofocus>
+<input type="text" id="search" placeholder="Search by commander name (e.g. 'Krenko', 'Atraxa', 'Heliod')..." autocomplete="off" autocorrect="off" spellcheck="false">
 <div class="cmd-grid" id="results"></div>
+<div id="sentinel" style="height:30px;"></div>
+<div id="footer-msg" style="text-align:center;color:#666;padding:1em;font-size:.85em;">&nbsp;</div>
 <script>
 const ALL_COMMANDERS = {{commanders|tojson}};
 const search = document.getElementById('search');
 const results = document.getElementById('results');
-function render(list) {
-    results.innerHTML = '';
-    list.slice(0, 60).forEach(c => {
+const sentinel = document.getElementById('sentinel');
+const footerMsg = document.getElementById('footer-msg');
+
+// Currently-displayed list (after filtering) and how many of it we've rendered.
+let currentList = ALL_COMMANDERS;
+let rendered = 0;
+const PAGE_SIZE = 60;
+
+function appendCards(items) {
+    const frag = document.createDocumentFragment();
+    items.forEach(c => {
         const div = document.createElement('div');
         div.className = 'cmd-card';
         div.innerHTML = `
@@ -1037,16 +1052,76 @@ function render(list) {
         div.addEventListener('click', () => {
             window.location = '/set_commander/' + encodeURIComponent(c.oracle_id);
         });
-        results.appendChild(div);
+        frag.appendChild(div);
     });
+    results.appendChild(frag);
 }
+
+function renderNextPage() {
+    if (rendered >= currentList.length) {
+        footerMsg.textContent = currentList.length === 0
+            ? 'No commanders match.'
+            : `${currentList.length} commander${currentList.length === 1 ? '' : 's'} shown.`;
+        return;
+    }
+    const slice = currentList.slice(rendered, rendered + PAGE_SIZE);
+    appendCards(slice);
+    rendered += slice.length;
+    footerMsg.textContent = rendered < currentList.length
+        ? `Showing ${rendered} of ${currentList.length} — scroll for more`
+        : `${currentList.length} commander${currentList.length === 1 ? '' : 's'} shown.`;
+}
+
+function resetWith(list) {
+    currentList = list;
+    rendered = 0;
+    results.innerHTML = '';
+    renderNextPage();
+}
+
+// Filter as the user types, with a tiny debounce so we don't churn the
+// DOM on every keystroke.  resetWith() rerenders from the top and the
+// IntersectionObserver below picks up scrolling on the new list.
+let searchTimer = null;
 search.addEventListener('input', () => {
-    const q = search.value.toLowerCase().trim();
-    if (!q) { render(ALL_COMMANDERS.slice(0, 60)); return; }
-    const matched = ALL_COMMANDERS.filter(c => c.name.toLowerCase().includes(q));
-    render(matched);
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => {
+        const q = search.value.toLowerCase().trim();
+        if (!q) { resetWith(ALL_COMMANDERS); return; }
+        resetWith(ALL_COMMANDERS.filter(c => c.name.toLowerCase().includes(q)));
+    }, 80);
 });
-render(ALL_COMMANDERS.slice(0, 60));
+
+// Infinite scroll — append the next page whenever the sentinel scrolls
+// into view. rootMargin=200px loads slightly before the user reaches
+// the bottom so it feels seamless.
+const io = new IntersectionObserver(entries => {
+    for (const e of entries) {
+        if (e.isIntersecting) renderNextPage();
+    }
+}, { rootMargin: '200px' });
+io.observe(sentinel);
+
+// Initial paint.
+resetWith(ALL_COMMANDERS);
+
+// Defensive focus handling. The native autofocus attribute can be lost
+// on Electron's BrowserWindow when navigating back to this page (e.g.
+// after Reset), so we explicitly focus on load AND make the input click
+// itself fall through to focus, in case something else stole pointer
+// capture.
+window.addEventListener('load', () => search.focus());
+search.addEventListener('click', () => search.focus());
+search.addEventListener('pointerdown', () => search.focus());
+// Cmd/Ctrl+F or "/" jumps focus into search.
+window.addEventListener('keydown', e => {
+    if (e.key === '/' && document.activeElement !== search) {
+        e.preventDefault();
+        search.focus();
+        search.select();
+    }
+});
+search.focus();
 </script>
 </body></html>
 """
@@ -1178,6 +1253,9 @@ h2 { color: #fff; margin: .3em 0 .8em 0; }
     </form>
     <button class="export-btn" id="copy-btn">Copy to Clipboard</button>
     <a href="/export.txt" download="deck.txt"><button class="export-btn">Download TXT</button></a>
+    <a href="/random_commander" title="Pick a different commander at random and start over"
+       onclick="return confirm('Reroll commander? Your current deck will be cleared.');"
+       ><button class="export-btn" style="background:#465;">Random</button></a>
     <a href="/reset" onclick="return confirm('Start over?')"><button>Reset</button></a>
   </span>
 </div>
@@ -1872,28 +1950,21 @@ def auto_build():
         STATE["deck_ids"].append(oid)
         return True
 
-    # ---- Phase 1: utility lands ONLY ---------------------------------
-    # Mana rocks are deliberately deferred to Phase 4 (after synergy fill).
-    # Including them up front makes the synergy ranker think the deck is
-    # an artifact-mana strategy and biases later picks toward Doubling
-    # Cube / Chromatic Lantern / Manaweft Sliver / X-spells / etc., which
-    # have nothing to do with the commander's actual theme.  By keeping
-    # only commander-neutral utility lands in the deck during synergy
-    # ranking, the ranker focuses purely on what the commander cares
-    # about.  Cycle lands (originals/shocks/triomes/etc.) are deferred
-    # to Phase 5 so they can be matched to the deck's actual pip mix.
+    # ---- Phase 1: nothing committed yet ------------------------------
+    # ALL staples (rocks AND universal lands) are deferred to AFTER the
+    # synergy fill so they don't influence the ranker's view of the
+    # deck. Reliquary Tower, Rogue's Passage, Command Tower, Sol Ring
+    # etc. are added in Phases 4-5 alongside the cycle lands and basics.
+    # The synergy ranker only sees the commander while it picks spells.
     rocks_to_add = list(STAPLE_MANA_ROCKS_ANY)
     if n_colors >= 2:
         rocks_to_add += STAPLE_MANA_ROCKS_MULTI
 
-    for name in STAPLE_LANDS_COLORLESS:
-        try_add(name)
+    utility_lands_to_add = list(STAPLE_LANDS_COLORLESS)
     if n_colors >= 2:
-        for name in STAPLE_LANDS_MULTI:
-            try_add(name)
+        utility_lands_to_add += STAPLE_LANDS_MULTI
     if n_colors >= 3:
-        for name in STAPLE_LANDS_3PLUS:
-            try_add(name)
+        utility_lands_to_add += STAPLE_LANDS_3PLUS
 
     # ---- Phase 2: tribal core (for tribal payoff commanders) ---------
     # If the commander references a tribe AND is itself of that tribe,
@@ -1948,7 +2019,12 @@ def auto_build():
         if non_land_slots >= SYNERGY_TARGET:
             break
         safety -= 1
-        suggestions = rank_suggestions(top_n=10)
+        # Pull a deep top-N — when the new tighter scoring leaves few
+        # high-edge candidates, the top 10 can all be lands (lands score
+        # from color-fix even with no synergy edges) and the loop bailed
+        # early, leaving the deck at 60-80 cards. 100 is generous enough
+        # that there's always a non-land option to pick.
+        suggestions = rank_suggestions(top_n=100)
         if not suggestions:
             break
         pick = next((s for s in suggestions
@@ -1958,11 +2034,15 @@ def auto_build():
             break
         STATE["deck_ids"].append(pick["card"]["oracle_id"])
 
-    # ---- Phase 4: deferred staple mana rocks -------------------------
-    # Sol Ring etc. are added now, AFTER synergy ranking has finished,
-    # so their presence in the deck doesn't bias the ranker toward
-    # artifact-mana / X-spell / "ramp_mana producer" themes.
+    # ---- Phase 4: deferred staples (rocks + universal utility lands) -
+    # Sol Ring, Mind Stone, etc. — and Reliquary Tower, Rogue's Passage,
+    # Command Tower, etc. — are added now, AFTER synergy ranking has
+    # finished. Their presence in the deck during the ranker pass would
+    # otherwise bias picks toward artifact-mana / X-spell / "ramp_mana
+    # producer" themes that have nothing to do with the commander.
     for name in rocks_to_add:
+        try_add(name)
+    for name in utility_lands_to_add:
         try_add(name)
 
     # ---- Phase 5: pip-aware mana base --------------------------------
@@ -1989,6 +2069,10 @@ def auto_build():
 
     # 4b: phase 3a-equivalent — fill remaining nonbasic land slots by
     # color-fix score (Mana Confluence, Forbidden Orchard, fetches).
+    # We size the basics target empirically by color count, but cap it
+    # at whatever leaves room for the cycle lands + utility lands +
+    # phase-3a fill we already committed.  Whatever's left of
+    # TOTAL_LANDS_TARGET goes to basics (computed below in 4c).
     BASICS_BY_COLORS = {0: 8, 1: 28, 2: 22, 3: 17, 4: 14, 5: 12}
     target_basics = BASICS_BY_COLORS.get(n_colors, 22)
     nonbasic_lands_in_deck = sum(
@@ -2018,6 +2102,13 @@ def auto_build():
             STATE["deck_ids"].append(oid)
 
     # 4c: basics distributed proportional to pips
+    # Re-derive target_basics so the total land count lands on exactly
+    # TOTAL_LANDS_TARGET regardless of how phases 4a/4b shook out.
+    nonbasic_lands_in_deck = sum(
+        1 for o in STATE["deck_ids"]
+        if "LAND" in (CARDS[o].get("card_types") or [])
+    )
+    target_basics = max(0, TOTAL_LANDS_TARGET - nonbasic_lands_in_deck)
     BASIC_FOR = {"W": "Plains", "U": "Island", "B": "Swamp",
                  "R": "Mountain", "G": "Forest"}
     if n_colors == 0:
@@ -2057,12 +2148,13 @@ def auto_build():
         for color, n in floors.items():
             STATE["basics"][BASIC_FOR[color]] = n
 
-    # ---- Phase 5: top-up if we're under 100 cards --------------------
-    # Rare edge case where ranker exhausted before SPELL_TARGET.
+    # ---- Phase 6: top-up if we're under 100 cards --------------------
+    # Rare edge case where the synergy ranker ran out before hitting
+    # SYNERGY_TARGET. Keep adding the highest-scoring non-land suggestion.
     safety = 100
     while deck_size() < 100 and safety > 0:
         safety -= 1
-        suggestions = rank_suggestions(top_n=10)
+        suggestions = rank_suggestions(top_n=100)
         if not suggestions:
             break
         pick = next((s for s in suggestions
