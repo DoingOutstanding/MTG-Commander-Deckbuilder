@@ -1,0 +1,11 @@
+node_modules/
+package-lock.json
+yarn.lock
+
+# Build outputs
+dist/
+out/
+
+# OS metadata
+.DS_Store
+Thumbs.db

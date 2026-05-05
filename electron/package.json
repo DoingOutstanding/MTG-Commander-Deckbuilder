@@ -1,0 +1,68 @@
+{
+  "name": "mtg-commander-deckbuilder",
+  "version": "0.1.0",
+  "description": "Local-first MTG Commander deckbuilder that ranks card suggestions by structural interaction strength.",
+  "main": "main.js",
+  "private": true,
+  "author": "Ulysses",
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "electron .",
+    "build:server": "node ./scripts/build-server.js",
+    "pack": "npm run build:server && electron-builder --dir",
+    "dist": "npm run build:server && electron-builder",
+    "dist:win": "npm run build:server && electron-builder --win",
+    "dist:mac": "npm run build:server && electron-builder --mac",
+    "dist:linux": "npm run build:server && electron-builder --linux"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.0"
+  },
+  "build": {
+    "appId": "com.ulysses.mtg-commander-deckbuilder",
+    "productName": "MTG Commander Deckbuilder",
+    "asar": true,
+    "files": [
+      "main.js",
+      "package.json",
+      "build/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../dist/server",
+        "to": "server",
+        "filter": ["**/*"]
+      }
+    ],
+    "directories": {
+      "buildResources": "build",
+      "output": "../dist/electron"
+    },
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] }
+      ],
+      "icon": "build/icon.png"
+    },
+    "mac": {
+      "target": [
+        { "target": "dmg", "arch": ["x64", "arm64"] }
+      ],
+      "category": "public.app-category.utilities",
+      "icon": "build/icon.png"
+    },
+    "linux": {
+      "target": [
+        { "target": "AppImage", "arch": ["x64"] }
+      ],
+      "category": "Utility",
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false
+    }
+  }
+}

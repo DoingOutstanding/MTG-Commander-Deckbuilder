@@ -1,0 +1,89 @@
+# xmage_excluded.txt — personal XMage exclusion list
+#
+# Cards listed here are SUBTRACTED from the XMage mode card pool, even
+# if they appear in xmage_cards.txt.  Useful when your installed XMage
+# binary is older than the source tree the bundled list was built from,
+# or when a card is technically registered in XMage but the
+# implementation isn't complete enough to import.
+#
+# Format: one card name per line.  Comments start with '#'.  Names are
+# normalized on read (case-insensitive, punctuation/whitespace ignored),
+# so all of these match the same card:
+#     Knowledge Seeker
+#     knowledge seeker
+#     KnowledgeSeeker
+#
+# Add a card here when XMage rejects it on deck import; remove the line
+# (or delete this file) when your XMage gets updated.
+# ---------------------------------------------------------------------
+
+# --- Reported by user as rejected on deck import ---
+Baxter, Fly in the Ointment
+Knowledge Seeker
+Ray Fillet, Man Ray
+Technodrome
+Nita, Forum Conciliator
+Sandbender Scavengers
+High Score
+Leader's Talent
+Leaves From The Vine
+Leonardo, cutting edge
+lita, Little orphan amphibian
+Michelangelo, Weirdness to 11
+Momo, Playful pet
+Solid Ground
+The Art of tea
+Grave Venerations
+Lavaleaper
+Metalhead
+The Moment
+Zhao, Ruthless Admiral
+Funeral Room
+Greenhouse // Rickety Gazebo
+Groundchuck & Dirtbag
+Shimmerwilds Growth
+Tundra Tank
+Path of the Pyromancer
+Rapturous Moment
+Resonating Lute
+Sozin's Comet
+Scuzzback Scrounger
+
+# --- Mutate cards (Ikoria: Lair of Behemoths + reprints) ---
+# Reported by user as not playable in their XMage build.  Remove when
+# XMage gets a complete mutate implementation in the binary you're
+# playing on.
+Archipelagore
+Auspicious Starrix
+Boneyard Lurker
+Brokkos, Apex of Forever
+Cavern Whisperer
+Chittering Harvester
+Cloudpiercer
+Cubwarden
+Dirge Bat
+Dreamtail Heron
+Everquill Phoenix
+Gemrazer
+Glowstone Recluse
+Huntmaster Liger
+Illuna, Apex of Wishes
+Insatiable Hemophage
+Lore Drakkis
+Majestic Auricorn
+Migratory Greathorn
+Mindleecher
+Necropanther
+Nethroi, Apex of Death
+Otrimi, the Ever-Playful
+Parcelbeast
+Porcuparrot
+Pouncing Shoreshark
+Regal Leosaur
+Sawtusk Demolisher
+Sea-Dasher Octopus
+Snapdax, Apex of the Hunt
+Souvenir Snatcher
+Trumpeting Gnarr
+Vadrok, Apex of Thunder
+Vulpikeet

@@ -6,6 +6,26 @@ __pycache__/
 # C extensions
 *.so
 
+# --- Generated card data (rebuild with profile.py) ---
+cards.jsonl
+oracle-cards-*.json
+pair_cache.pkl.gz
+
+# --- Electron / Node ---
+node_modules/
+package-lock.json
+yarn.lock
+electron/dist/
+dist/
+out/
+
+# --- PyInstaller intermediates ---
+*.spec
+
+# --- OS metadata ---
+.DS_Store
+Thumbs.db
+
 # Distribution / packaging
 .Python
 build/
