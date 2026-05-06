@@ -267,6 +267,52 @@ BRACKETS = {
 
 DECK_TARGET_SIZE = 100  # commander + 99
 
+
+# ---------- Tunable settings (persisted to DATA_DIR/settings.json) ----
+# Numeric defaults that the user can override on the /settings page.
+# Anything in DEFAULT_SETTINGS becomes editable; anything outside this
+# dict stays as a hardcoded constant.
+DEFAULT_SETTINGS = {
+    "total_lands_target": 36,
+    "tribal_core_size": 25,
+    "cycle_cap_2c": 7,
+    "cycle_cap_3c": 11,
+    "cycle_cap_4c": 14,
+    "cycle_cap_5c": 16,
+    "basics_0c": 8,
+    "basics_1c": 28,
+    "basics_2c": 22,
+    "basics_3c": 17,
+    "basics_4c": 14,
+    "basics_5c": 12,
+}
+SETTINGS = dict(DEFAULT_SETTINGS)
+_SETTINGS_PATH = DATA_DIR / "settings.json"
+
+
+def _load_settings():
+    if not _SETTINGS_PATH.exists():
+        return
+    try:
+        with open(_SETTINGS_PATH, encoding="utf-8") as f:
+            saved = json.load(f)
+        for k, v in saved.items():
+            if k in DEFAULT_SETTINGS:
+                SETTINGS[k] = v
+    except (OSError, ValueError) as e:
+        print(f"  warning: couldn't load settings.json: {e}")
+
+
+def _save_settings():
+    try:
+        with open(_SETTINGS_PATH, "w", encoding="utf-8") as f:
+            json.dump(SETTINGS, f, indent=2)
+    except OSError as e:
+        print(f"  warning: couldn't save settings.json: {e}")
+
+
+_load_settings()
+
 # ---------- Auto-include staples ---------------------------------------
 # When auto-build runs, these are added before greedy ranking starts —
 # IF they're CI-legal for the chosen commander.  The list is split into
@@ -1021,6 +1067,7 @@ input[type=text] { width: 100%; padding: .6em; font-size: 1.1em; background: #2a
 .pip-C { background: #888; }
 </style>
 </head><body>
+<div style="float:right;margin-top:0.5em;"><a href="/settings" style="color:#6cf;">⚙ Settings</a></div>
 <h1>MTG Commander Deckbuilder</h1>
 <p>Pick a commander. The app will then suggest cards that interact most strongly with your commander, color-identity filtered. Or <a href="/import" style="color:#6cf;">import an existing deck list</a> or <a href="/random_commander" style="color:#6cf;">pick a random one</a>.</p>
 <input type="text" id="search" placeholder="Search by commander name (e.g. 'Krenko', 'Atraxa', 'Heliod')..." autocomplete="off" autocorrect="off" spellcheck="false">
@@ -1257,6 +1304,7 @@ h2 { color: #fff; margin: .3em 0 .8em 0; }
     <a href="/random_commander" title="Pick a different commander at random and start over"
        onclick="return confirm('Reroll commander? Your current deck will be cleared.');"
        ><button class="export-btn" style="background:#465;">Random</button></a>
+    <a href="/settings" title="XMage exclusion list, auto-build parameters"><button class="export-btn" style="background:#446;">⚙</button></a>
     <a href="/reset" onclick="return confirm('Start over?')"><button>Reset</button></a>
   </span>
 </div>
@@ -1811,6 +1859,196 @@ def reset():
     return redirect(url_for("index"))
 
 
+SETTINGS_HTML = """
+<!doctype html>
+<html><head>
+<title>Settings — MTG Commander Deckbuilder</title>
+<meta charset="utf-8">
+<style>
+body { font-family: system-ui, sans-serif; max-width: 1000px; margin: 1.5em auto; padding: 0 1em; background: #1a1a1f; color: #ddd; }
+h1, h2 { color: #fff; }
+h2 { border-bottom: 1px solid #333; padding-bottom: .2em; margin-top: 1.5em; }
+a { color: #6cf; }
+.section { background: #25252a; border-radius: 6px; padding: 1em 1.2em; margin: 1em 0; }
+.help { color: #888; font-size: .85em; margin: .3em 0 .8em 0; line-height: 1.4; }
+textarea { width: 100%; min-height: 380px; padding: .6em; background: #1a1a1f; color: #ddd; border: 1px solid #444; border-radius: 4px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .85em; box-sizing: border-box; resize: vertical; }
+.grid { display: grid; grid-template-columns: 1fr 100px; gap: .4em 1em; align-items: center; }
+.grid label { color: #ccc; font-size: .9em; }
+.grid input[type=number] { width: 100%; padding: .35em; background: #1a1a1f; color: #ddd; border: 1px solid #444; border-radius: 3px; font-size: .9em; box-sizing: border-box; }
+button { background: #283; color: #fff; border: none; padding: .55em 1.2em; border-radius: 4px; cursor: pointer; font-size: .95em; font-weight: bold; }
+button:hover { background: #3a4; }
+button.secondary { background: #444; color: #ddd; }
+button.secondary:hover { background: #555; }
+.flash { background: #2a3a2a; border: 1px solid #4a6a4a; color: #cfc; padding: .6em 1em; border-radius: 4px; margin-bottom: 1em; }
+.flash.error { background: #3a2a2a; border-color: #6a4a4a; color: #fcc; }
+.actions { margin-top: 1em; display: flex; gap: .5em; }
+.path { font-family: ui-monospace, monospace; font-size: .8em; color: #888; word-break: break-all; }
+hr { border: 0; border-top: 1px solid #333; margin: 1em 0; }
+</style>
+</head><body>
+<p><a href="{{ url_for('index') }}">← Back to commander select</a></p>
+<h1>Settings</h1>
+{% if flash %}<div class="flash{% if flash_error %} error{% endif %}">{{ flash }}</div>{% endif %}
+
+<form method="POST" action="{{ url_for('settings_xmage_save') }}" class="section">
+  <h2>XMage exclusion list</h2>
+  <p class="help">
+    Cards in this list are SUBTRACTED from the XMage mode pool. Add a name per
+    line when XMage rejects a card on deck import. Names are normalized on read,
+    so "Knowledge Seeker", "knowledge seeker", and "KnowledgeSeeker" all match
+    the same card. Comments start with <code>#</code>.
+  </p>
+  <p class="help">Saved to: <span class="path">{{ excluded_path }}</span></p>
+  <textarea name="content" spellcheck="false">{{ excluded_text }}</textarea>
+  <div class="actions">
+    <button type="submit">Save exclusion list</button>
+  </div>
+</form>
+
+<form method="POST" action="{{ url_for('settings_tunables_save') }}" class="section">
+  <h2>Auto-build parameters</h2>
+  <p class="help">
+    Numeric knobs that auto-build uses. Defaults match what most well-built
+    Commander decks land at; tweak if you want denser tribal cores or a
+    different basic-land mix.
+  </p>
+  <h3 style="font-size:.95em;color:#aaa;margin:.8em 0 .3em 0;">Land base</h3>
+  <div class="grid">
+    <label for="total_lands_target">Total lands target</label>
+    <input id="total_lands_target" name="total_lands_target" type="number" min="20" max="50" value="{{ s.total_lands_target }}">
+    <label for="tribal_core_size">Tribal core size (creatures pre-loaded for tribal commanders)</label>
+    <input id="tribal_core_size" name="tribal_core_size" type="number" min="0" max="60" value="{{ s.tribal_core_size }}">
+  </div>
+  <h3 style="font-size:.95em;color:#aaa;margin:1em 0 .3em 0;">Cycle-land cap by color count</h3>
+  <p class="help">How many original/shock/triome/check/etc. lands to add before falling back to basics. Higher = more dual lands, fewer basics.</p>
+  <div class="grid">
+    <label for="cycle_cap_2c">2-color decks</label>
+    <input id="cycle_cap_2c" name="cycle_cap_2c" type="number" min="0" max="30" value="{{ s.cycle_cap_2c }}">
+    <label for="cycle_cap_3c">3-color decks</label>
+    <input id="cycle_cap_3c" name="cycle_cap_3c" type="number" min="0" max="30" value="{{ s.cycle_cap_3c }}">
+    <label for="cycle_cap_4c">4-color decks</label>
+    <input id="cycle_cap_4c" name="cycle_cap_4c" type="number" min="0" max="30" value="{{ s.cycle_cap_4c }}">
+    <label for="cycle_cap_5c">5-color decks</label>
+    <input id="cycle_cap_5c" name="cycle_cap_5c" type="number" min="0" max="30" value="{{ s.cycle_cap_5c }}">
+  </div>
+  <h3 style="font-size:.95em;color:#aaa;margin:1em 0 .3em 0;">Basic land target by color count</h3>
+  <p class="help">Distributed proportional to colored mana pips in the assembled deck.</p>
+  <div class="grid">
+    <label for="basics_0c">Colorless commander</label>
+    <input id="basics_0c" name="basics_0c" type="number" min="0" max="50" value="{{ s.basics_0c }}">
+    <label for="basics_1c">1-color decks</label>
+    <input id="basics_1c" name="basics_1c" type="number" min="0" max="50" value="{{ s.basics_1c }}">
+    <label for="basics_2c">2-color decks</label>
+    <input id="basics_2c" name="basics_2c" type="number" min="0" max="50" value="{{ s.basics_2c }}">
+    <label for="basics_3c">3-color decks</label>
+    <input id="basics_3c" name="basics_3c" type="number" min="0" max="50" value="{{ s.basics_3c }}">
+    <label for="basics_4c">4-color decks</label>
+    <input id="basics_4c" name="basics_4c" type="number" min="0" max="50" value="{{ s.basics_4c }}">
+    <label for="basics_5c">5-color decks</label>
+    <input id="basics_5c" name="basics_5c" type="number" min="0" max="50" value="{{ s.basics_5c }}">
+  </div>
+  <div class="actions">
+    <button type="submit">Save parameters</button>
+    <button type="submit" class="secondary" name="reset_defaults" value="1"
+            onclick="return confirm('Reset all parameters to defaults?');">Reset to defaults</button>
+  </div>
+</form>
+
+<div class="section">
+  <h2>About</h2>
+  <p class="help">User data folder: <span class="path">{{ data_dir }}</span></p>
+  <p class="help">Cards loaded: {{ card_count }} ({{ commander_count }} commander-eligible)</p>
+  {% if xmage_available %}<p class="help">XMage card pool: {{ xmage_count }} cards (after exclusions applied)</p>{% endif %}
+</div>
+</body></html>
+"""
+
+
+@app.route("/settings")
+def settings_page():
+    excluded_path = DATA_DIR / "xmage_excluded.txt"
+    bundle_path = ROOT / "xmage_excluded.txt"
+    # Read whatever's currently in effect — prefer user-data copy, fall back
+    # to bundled default so first edit starts from the curated list.
+    if excluded_path.exists():
+        try:
+            excluded_text = excluded_path.read_text(encoding="utf-8")
+        except OSError:
+            excluded_text = ""
+    elif bundle_path.exists():
+        try:
+            excluded_text = bundle_path.read_text(encoding="utf-8")
+        except OSError:
+            excluded_text = ""
+    else:
+        excluded_text = ""
+    return render_template_string(
+        SETTINGS_HTML,
+        s=SETTINGS,
+        excluded_text=excluded_text,
+        excluded_path=str(excluded_path),
+        data_dir=str(DATA_DIR),
+        card_count=len(CARDS),
+        commander_count=len(COMMANDER_OPTIONS),
+        xmage_available=XMAGE_NAME_SET is not None,
+        xmage_count=len(XMAGE_NAME_SET) if XMAGE_NAME_SET else 0,
+        flash=request.args.get("flash"),
+        flash_error=bool(request.args.get("error")),
+    )
+
+
+@app.route("/settings/xmage", methods=["POST"])
+def settings_xmage_save():
+    """Persist the textarea contents to xmage_excluded.txt and reload
+    the live XMAGE_NAME_SET so the change takes effect immediately."""
+    global XMAGE_NAME_SET
+    content = request.form.get("content", "")
+    excluded_path = DATA_DIR / "xmage_excluded.txt"
+    try:
+        excluded_path.write_text(content, encoding="utf-8")
+    except OSError as e:
+        return redirect(url_for("settings_page",
+                                flash=f"Couldn't save: {e}", error=1))
+    # Rebuild the XMage name set from disk so the new list takes effect.
+    XMAGE_NAME_SET = _build_xmage_name_set()
+    # Score cache is unaffected (pair scoring doesn't depend on XMage),
+    # but the suggestion ranker reads XMAGE_NAME_SET on each call.
+    excluded_count = sum(1 for line in content.splitlines()
+                         if line.strip() and not line.strip().startswith("#"))
+    return redirect(url_for("settings_page",
+                            flash=f"Saved. XMage exclusion list now has {excluded_count} card name(s)."))
+
+
+@app.route("/settings/tunables", methods=["POST"])
+def settings_tunables_save():
+    """Update auto-build numeric parameters. Form fields whose names
+    match keys in DEFAULT_SETTINGS are read; everything else is ignored.
+    A 'reset_defaults' button restores all to defaults."""
+    if request.form.get("reset_defaults"):
+        SETTINGS.update(DEFAULT_SETTINGS)
+        _save_settings()
+        return redirect(url_for("settings_page", flash="Parameters reset to defaults."))
+    errors = []
+    for key, default in DEFAULT_SETTINGS.items():
+        raw = request.form.get(key)
+        if raw is None or raw.strip() == "":
+            continue
+        try:
+            val = int(raw)
+        except ValueError:
+            errors.append(f"{key}: not an integer")
+            continue
+        if val < 0:
+            errors.append(f"{key}: must be >= 0")
+            continue
+        SETTINGS[key] = val
+    _save_settings()
+    if errors:
+        return redirect(url_for("settings_page",
+                                flash="Saved with issues: " + "; ".join(errors), error=1))
+    return redirect(url_for("settings_page", flash="Parameters saved."))
+
+
 @app.route("/set_basic", methods=["POST"])
 def set_basic():
     name = request.form.get("name", "")
@@ -2001,7 +2239,7 @@ def auto_build():
                 continue
             members.append((c.get("edhrec_rank") or 999999, c["name"], o))
         members.sort()
-        for _, _, oid in members[:25]:
+        for _, _, oid in members[:SETTINGS["tribal_core_size"]]:
             STATE["deck_ids"].append(oid)
     elif chosen_type_commander:
         # "Choose a creature type" commander (Morophon the Boundless,
@@ -2053,8 +2291,8 @@ def auto_build():
     # rock counts toward the 63-spell target, so synergy fill stops
     # earlier when the rock count is higher (more multi-color decks add
     # more rocks).
-    TOTAL_LANDS_TARGET = 36
-    SPELL_TARGET = 100 - 1 - TOTAL_LANDS_TARGET  # 63
+    TOTAL_LANDS_TARGET = SETTINGS["total_lands_target"]
+    SPELL_TARGET = 100 - 1 - TOTAL_LANDS_TARGET
     rocks_eligible = sum(
         1 for n in rocks_to_add
         if NAME_TO_ID.get(n.lower()) and is_legal(CARDS[NAME_TO_ID[n.lower()]])
@@ -2109,7 +2347,10 @@ def auto_build():
 
     # 4a: cycle picks proportional to pips
     cycle_picks = cycle_lands_for_ci_pip_weighted(cmd_ci, pips)
-    cycle_cap = {2: 7, 3: 11, 4: 14, 5: 16}.get(n_colors, 0)
+    cycle_cap = {
+        2: SETTINGS["cycle_cap_2c"], 3: SETTINGS["cycle_cap_3c"],
+        4: SETTINGS["cycle_cap_4c"], 5: SETTINGS["cycle_cap_5c"],
+    }.get(n_colors, 0)
     cycle_added = 0
     for name in cycle_picks:
         if cycle_added >= cycle_cap:
@@ -2123,7 +2364,11 @@ def auto_build():
     # at whatever leaves room for the cycle lands + utility lands +
     # phase-3a fill we already committed.  Whatever's left of
     # TOTAL_LANDS_TARGET goes to basics (computed below in 4c).
-    BASICS_BY_COLORS = {0: 8, 1: 28, 2: 22, 3: 17, 4: 14, 5: 12}
+    BASICS_BY_COLORS = {
+        0: SETTINGS["basics_0c"], 1: SETTINGS["basics_1c"],
+        2: SETTINGS["basics_2c"], 3: SETTINGS["basics_3c"],
+        4: SETTINGS["basics_4c"], 5: SETTINGS["basics_5c"],
+    }
     target_basics = BASICS_BY_COLORS.get(n_colors, 22)
     nonbasic_lands_in_deck = sum(
         1 for o in STATE["deck_ids"]
