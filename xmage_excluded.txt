@@ -48,6 +48,17 @@ Rapturous Moment
 Resonating Lute
 Sozin's Comet
 Scuzzback Scrounger
+Additive Evolution
+Auntie Ool, Cursewretch
+Bristlebane battler
+Burning Curiosity
+Chaos Spewer
+Cinder Strike
+Gristle Glutton
+Shadow Urchin
+Soul Immolation
+Sourbread Auntie
+The legend of kyoshi // Avatar Kyoshi
 
 # --- Mutate cards (Ikoria: Lair of Behemoths + reprints) ---
 # Reported by user as not playable in their XMage build.  Remove when
