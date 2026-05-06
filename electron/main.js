@@ -150,6 +150,38 @@ function createWindow() {
 
   mainWindow.loadURL(`http://${HOST}:${serverPort}/`);
 
+  // After every navigation (back to commander select after Reset, etc.)
+  // explicitly re-focus the window and its web contents. Electron on
+  // Windows in particular can drop OS-level keyboard focus across
+  // navigations, which manifests as "click on search bar does nothing,
+  // have to minimize and restore the app to fix it". We force focus
+  // back on every navigation event AND inject a small focus-the-search
+  // helper so the user lands ready to type.
+  const refocus = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    mainWindow.focus();
+    mainWindow.webContents.focus();
+  };
+  mainWindow.webContents.on('did-finish-load', () => {
+    refocus();
+    // Find an obvious focusable input on the page (commander search,
+    // deck-page card search) and focus it. Wrapped in try/catch
+    // because the page might not have any matching input.
+    mainWindow.webContents.executeJavaScript(`
+      (() => {
+        const el = document.querySelector('#search') ||
+                   document.querySelector('input[type="text"]:not([readonly])');
+        if (el) el.focus();
+      })();
+    `).catch(() => {});
+  });
+  mainWindow.webContents.on('did-navigate', refocus);
+  mainWindow.webContents.on('did-navigate-in-page', refocus);
+  // When the user clicks back to the window (e.g. Alt-Tab), make sure
+  // keyboard focus is reasserted — Windows sometimes hands focus to
+  // an unfocusable element on restore.
+  mainWindow.on('focus', refocus);
+
   // Open external links (e.g. Scryfall card pages) in the system browser
   // instead of inside the Electron window.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {

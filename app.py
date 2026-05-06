@@ -22,6 +22,7 @@ State is in-memory (single-user). Restart of the server clears the deck.
 
 import json
 import os
+import re
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -1975,13 +1976,19 @@ def auto_build():
     # won't favour tribe members until many are already in the deck.
     cmd_refs = set(cmd.get("tribes_referenced") or [])
     cmd_is = set(cmd.get("tribes_is") or [])
+    cmd_text = (cmd.get("oracle_text") or "").lower()
     primary_tribe = None
+    chosen_type_commander = bool(re.search(
+        r"as .{0,30}? enters,? .{0,40}?choose a (creature type|kindred|color)|"
+        r"chosen creature type|chosen color",
+        cmd_text))
     for t in cmd_refs & cmd_is:
         if (TRIBE_SIZES.get(t, 0) >= 30 and
                 t not in {"Human"}):  # Human is too generic to be tribal
             primary_tribe = t
             break
     if primary_tribe:
+        # Standard tribal commander: build around its named tribe.
         members = []
         for o, c in CARDS.items():
             if not is_legal(c):
@@ -1996,6 +2003,49 @@ def auto_build():
         members.sort()
         for _, _, oid in members[:25]:
             STATE["deck_ids"].append(oid)
+    elif chosen_type_commander:
+        # "Choose a creature type" commander (Morophon the Boundless,
+        # Maskwood Nexus, Reflections of Littjara-style).  We don't know
+        # which tribe the user will pick at the table, so build around
+        # CHANGELINGS — Universal Automaton, Changeling Berserker,
+        # Mistform Ultimus, Maskwood Nexus, Realmwalker, etc. — which
+        # count as every creature type and therefore benefit from any
+        # named tribe. Add a smaller core (15) since a chosen-type deck
+        # also wants tribal-anthem support cards picked via synergy.
+        members = []
+        for o, c in CARDS.items():
+            if not is_legal(c):
+                continue
+            if o == STATE["commander_id"] or o in STATE["deck_ids"]:
+                continue
+            if "CREATURE" not in (c.get("card_types") or []):
+                continue
+            if "Shapeshifter" not in (c.get("tribes_is") or []):
+                continue
+            text = (c.get("oracle_text") or "").lower()
+            # Only true Changelings — they explicitly say so or they have
+            # the Changeling keyword. Plain Shapeshifters that don't
+            # type-shift (like Cytoshape) don't help here.
+            if not (re.search(r"\bchangeling\b", text) or
+                    re.search(r"is every creature type|each creature type",
+                              text)):
+                continue
+            members.append((c.get("edhrec_rank") or 999999, c["name"], o))
+        members.sort()
+        for _, _, oid in members[:15]:
+            STATE["deck_ids"].append(oid)
+        # Also pull in the "every creature is every type" enablers and
+        # universal tribal lords so the deck has anthem support no
+        # matter which tribe the player names.
+        for name in ["Maskwood Nexus", "Mirror Entity", "Realmwalker",
+                     "Cavern of Souls", "Door of Destinies",
+                     "Coat of Arms", "Vanquisher's Banner",
+                     "Kindred Discovery", "Pir's Whim",
+                     "Conspiracy", "Arcane Adaptation",
+                     "Roaming Throne", "Herald's Horn",
+                     "Path of Ancestry", "Unclaimed Territory",
+                     "Ancient Ziggurat"]:
+            try_add(name)
 
     # ---- Phase 3: synergy fill spell slots ---------------------------
     # Target enough non-land cards to leave room for the deferred mana
